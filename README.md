@@ -138,11 +138,16 @@ assert檢查rehashidx有無跑掉
         assert(DICTHT_SIZE(d->ht_size_exp[0]) > (unsigned long)d->rehashidx);
 ```
 
+如果遇到空桶，直接跳過，直到找到非空桶，若達到empty_visits上限，結束這一次的rehashing。
 ```
         while(d->ht_table[0][d->rehashidx] == NULL) {
             d->rehashidx++;
             if (--empty_visits == 0) return 1;
         }
+```
+
+
+```
         de = d->ht_table[0][d->rehashidx];
         /* Move all the keys in this bucket from the old to the new hash HT */
         while(de) {
@@ -159,6 +164,10 @@ assert檢查rehashidx有無跑掉
                  * to get the bucket index in the smaller table. */
                 h = d->rehashidx & DICTHT_SIZE_MASK(d->ht_size_exp[1]);
             }
+```
+
+如果這個dict只儲存key而不存value，採取特殊優化處理
+```
             if (d->type->no_value) {
                 if (d->type->keys_are_odd && !d->ht_table[1][h]) {
                     /* Destination bucket is empty and we can store the key
@@ -181,7 +190,11 @@ assert檢查rehashidx有無跑掉
                     assert(entryIsNoValue(de));
                     dictSetNext(de, d->ht_table[1][h]);
                 }
-            } else {
+            }
+```
+正常移動
+```
+            else {
                 dictSetNext(de, d->ht_table[1][h]);
             }
             d->ht_table[1][h] = de;
@@ -191,8 +204,10 @@ assert檢查rehashidx有無跑掉
         }
         d->ht_table[0][d->rehashidx] = NULL;
         d->rehashidx++;
-    }
-
+    }    //while迴圈結束
+```
+檢查是否全數rehash完畢，
+```
     /* Check if we already rehashed the whole table... */
     if (d->ht_used[0] == 0) {
         if (d->type->rehashingCompleted) d->type->rehashingCompleted(d);
