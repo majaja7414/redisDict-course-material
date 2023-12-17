@@ -40,10 +40,6 @@ typedef struct {
 ```
 
 ```
-
-```
-
-```
 ```
 
 ##自動擴容rehashing
@@ -107,12 +103,23 @@ int _dictExpand(dict *d, unsigned long size, int* malloc_failed)
     return DICT_OK;
 }
 ```
-
+參數n*10決定最高同時訪問的空桶量，考慮極端情況下，只有5和99999這兩個bucket有資料，當轉移完5後，若沒限制訪問空桶量的限制，會從5一路訪問99999，造成其他事務必須等待，造成卡頓。
+取s0、s1分別為ht_table[0]和[1]的大小，此處exp指冪次，redis讓table的大小總是2^n，需要得到實際大小時，再使用DICTHT_SIZE這個類似macro的設計，以下是DICTHT_SIZE的設計：
+當傳入一個數，假設是x，代表大小為table大小為2^x，首先檢查是否為-1，是的話回傳0，不是的話回傳x的二進位左移一位(等同10進位中n乘二的操作)，假設x=4，二進位表示為1000，左移一位得10000，即16。
+```
+#define DICTHT_SIZE(exp) ((exp) == -1 ? 0 : (unsigned long)1<<(exp))
+```
 ```
 int dictRehash(dict *d, int n) {
     int empty_visits = n*10; /* Max number of empty buckets to visit. */
     unsigned long s0 = DICTHT_SIZE(d->ht_size_exp[0]);
     unsigned long s1 = DICTHT_SIZE(d->ht_size_exp[1]);
+```
+
+以下有兩種條件會先跳過rehashing：
+    1.dict的大小改變暫時被禁止(DICT_RESIZE_FORBID)，!dictIsRehashing(d)指dict
+    2.dict的大小改變暫時被忽略、跳過(DICT_RESIZE_AVOID)，且未達到強迫resize的條件(dict_force_resize_ratio)，即目前的dict大小還"能用"，不著急rehashing。
+```
     if (dict_can_resize == DICT_RESIZE_FORBID || !dictIsRehashing(d)) return 0;
     if (dict_can_resize == DICT_RESIZE_AVOID && 
         ((s1 > s0 && s1 / s0 < dict_force_resize_ratio) ||
@@ -120,6 +127,7 @@ int dictRehash(dict *d, int n) {
     {
         return 0;
     }
+```
 
     while(n-- && d->ht_used[0] != 0) {
         dictEntry *de, *nextde;
