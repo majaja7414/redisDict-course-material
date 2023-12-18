@@ -146,7 +146,7 @@ assert檢查rehashidx有無跑掉
         }
 ```
 
-
+以下是搬遷bucket的過程， 如果新table比舊table大，透過key取hash-value和新table的大小MASK來確定鍵在新table中的位置；如果新表比舊表小，直接使用rehashidx 和新表的大小MASK確定位置。
 ```
         de = d->ht_table[0][d->rehashidx];
         /* Move all the keys in this bucket from the old to the new hash HT */
@@ -206,7 +206,7 @@ assert檢查rehashidx有無跑掉
         d->rehashidx++;
     }    //while迴圈結束
 ```
-檢查是否全數rehash完畢，
+檢查是否全數rehash完畢，如果ht_table[0]已經沒有元素了，就釋放ht_table[0]，並且將ht_table[0]改為ht_table[1]，完成rehashing
 ```
     /* Check if we already rehashed the whole table... */
     if (d->ht_used[0] == 0) {
@@ -225,5 +225,4 @@ assert檢查rehashidx有無跑掉
     return 1;
 }
 ```
-```
-```
+
