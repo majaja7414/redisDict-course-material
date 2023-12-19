@@ -1,7 +1,7 @@
 # redisDictAnalying
 Trying to analyze dict.c and dict.h in redis.
 
-##基礎資料結構介紹
+## 基礎資料結構介紹
 
 ```
 struct dict {
@@ -19,8 +19,8 @@ struct dict {
 };
 ```
 
-###兩種Entry(作為節點使用)
-用於形成chaining，解決collision，分成有放key和沒放key兩種
+### 兩種Entry(作為節點使用)，分成有放key和沒放key兩種
+並且用於形成chaining，解決collision
 ```
 struct dictEntry {
     void *key;
@@ -39,10 +39,7 @@ typedef struct {
 } dictEntryNoValue;
 ```
 
-```
-```
-
-##自動擴容rehashing
+## 自動擴容rehashing
 ```
 int _dictExpand(dict *d, unsigned long size, int* malloc_failed)
 {
@@ -64,7 +61,7 @@ int _dictExpand(dict *d, unsigned long size, int* malloc_failed)
         return DICT_ERR;
 
     /* Rehashing to the same table size is not useful. */
-    if (new_ht_size_exp == d->ht_size_exp[0]) return DICT_ERR;    //如果rehash後table的size還是一樣大
+    if (new_ht_size_exp == d->ht_size_exp[0]) return DICT_ERR;
 
     /* Allocate the new hash table and initialize all pointers to NULL */
     if (malloc_failed) {
@@ -103,6 +100,7 @@ int _dictExpand(dict *d, unsigned long size, int* malloc_failed)
     return DICT_OK;
 }
 ```
+### 解析int dictRehash(dict *d, int n)
 參數n*10決定最高同時訪問的空桶量，考慮極端情況下，只有5和99999這兩個bucket有資料，當轉移完5後，若沒限制訪問空桶量的限制，會從5一路訪問99999，造成其他事務必須等待，造成卡頓。<br>
 
 取s0、s1分別為ht_table[0]和[1]的大小，此處exp指冪次，redis讓table的大小總是2^n，需要得到實際大小時，再使用DICTHT_SIZE這個類似macro的設計：當傳入一個數，假設是x，代表大小為table大小為2^x，首先檢查是否為-1，是的話回傳0，不是的話回傳x的二進位左移一位(等同10進位中n乘二的操作)，假設x=4，二進位表示為1000，左移一位得10000，即16。<br>
@@ -146,7 +144,8 @@ assert檢查rehashidx有無跑掉
         }
 ```
 
-以下是搬遷bucket的過程， 如果新table比舊table大，透過key取hash-value和新table的大小MASK來確定鍵在新table中的位置；如果新表比舊表小，直接使用rehashidx 和新表的大小MASK確定位置。
+以下是搬遷bucket的過程，如果新table比舊table大，透過key取hash-value和新table的大小MASK來確定鍵在新table中的位置；如果新表比舊表小，直接使用rehashidx 和新表的大小MASK確定位置。
+處理上分為同時存key&value的dict和只存key的dict，如果這個dict只儲存key而不存value，採取特殊處理
 ```
         de = d->ht_table[0][d->rehashidx];
         /* Move all the keys in this bucket from the old to the new hash HT */
@@ -164,10 +163,8 @@ assert檢查rehashidx有無跑掉
                  * to get the bucket index in the smaller table. */
                 h = d->rehashidx & DICTHT_SIZE_MASK(d->ht_size_exp[1]);
             }
-```
 
-如果這個dict只儲存key而不存value，採取特殊優化處理
-```
+            /*如果這個dict只儲存key而不存value，採取特殊優化處理*/
             if (d->type->no_value) {
                 if (d->type->keys_are_odd && !d->ht_table[1][h]) {
                     /* Destination bucket is empty and we can store the key
@@ -191,9 +188,8 @@ assert檢查rehashidx有無跑掉
                     dictSetNext(de, d->ht_table[1][h]);
                 }
             }
-```
-正常移動
-```
+
+            /*正常情況下的bucket搬遷*/    
             else {
                 dictSetNext(de, d->ht_table[1][h]);
             }
@@ -206,13 +202,13 @@ assert檢查rehashidx有無跑掉
         d->rehashidx++;
     }    //while迴圈結束
 ```
-檢查是否全數rehash完畢，如果ht_table[0]已經沒有元素了，就釋放ht_table[0]，並且將ht_table[0]改為ht_table[1]，完成rehashing
+接著檢查是否全數rehash完畢，如果ht_table[0]已經沒有元素了，就釋放ht_table[0]，並且將ht_table[0]改為ht_table[1]，完成rehashing。
 ```
-    /* Check if we already rehashed the whole table... */
+    /* 檢查是否已完成全部的rehashing */
     if (d->ht_used[0] == 0) {
         if (d->type->rehashingCompleted) d->type->rehashingCompleted(d);
         zfree(d->ht_table[0]);
-        /* Copy the new ht onto the old one */
+        /* table交換 */
         d->ht_table[0] = d->ht_table[1];
         d->ht_used[0] = d->ht_used[1];
         d->ht_size_exp[0] = d->ht_size_exp[1];
@@ -221,7 +217,7 @@ assert檢查rehashidx有無跑掉
         return 0;
     }
 
-    /* More to rehash... */
+    /* 如果還未完成rehashing，return 1 */
     return 1;
 }
 ```
