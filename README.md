@@ -1,8 +1,6 @@
-# redisDictAnalying
-Trying to analyze dict.c and dict.h in redis.
+# redis dict rehashing解析
 
 ## 基礎資料結構介紹
-
 ```
 struct dict {
     dictType *type;  //存放各式函數指標
@@ -15,7 +13,7 @@ struct dict {
     /* Keep small vars at end for optimal (minimal) struct padding */
     int16_t pauserehash; /* If >0 rehashing is paused (<0 indicates coding error) */
     signed char ht_size_exp[2]; /* exponent of size. (size = 1<<exp) */
-    void *metadata[];
+    void *metadata[]; //能夠根據不同的用例和需求來儲存額外的的資料
 };
 ```
 
