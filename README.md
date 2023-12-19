@@ -37,30 +37,36 @@ typedef struct {
 } dictEntryNoValue;
 ```
 
-## 自動擴容rehashing
+## 擴容或縮小
+參數size指新hash-table的大小，malloc_failed用來指示內存分配是否有問題
+
 ```
 int _dictExpand(dict *d, unsigned long size, int* malloc_failed)
 {
-    if (malloc_failed) *malloc_failed = 0;
+```
+錯誤檢測
+```
+    if (malloc_failed) *malloc_failed = 0;    //初始化malloc_failed
 
-    /* the size is invalid if it is smaller than the number of
-     * elements already inside the hash table */
+    /*如果dict正在rehashing或新大小小於現有大小，則返回錯誤*/
     if (dictIsRehashing(d) || d->ht_used[0] > size)
         return DICT_ERR;
 
-    /* the new hash table */
+    /* 給定新的table */
     dictEntry **new_ht_table;
     unsigned long new_ht_used;
     signed char new_ht_size_exp = _dictNextExp(size);
 
-    /* Detect overflows */
+    /* Detect overflows，檢查新大小是否合理 */
     size_t newsize = DICTHT_SIZE(new_ht_size_exp);
     if (newsize < size || newsize * sizeof(dictEntry*) < newsize)
         return DICT_ERR;
 
-    /* Rehashing to the same table size is not useful. */
+    /* 如果新舊大小一樣，則返回錯誤 */
     if (new_ht_size_exp == d->ht_size_exp[0]) return DICT_ERR;
-
+```
+如果上述錯誤檢測通過，並且內存分配沒有問題，創建一個新的table
+```
     /* Allocate the new hash table and initialize all pointers to NULL */
     if (malloc_failed) {
         new_ht_table = ztrycalloc(newsize*sizeof(dictEntry*));
@@ -71,7 +77,9 @@ int _dictExpand(dict *d, unsigned long size, int* malloc_failed)
         new_ht_table = zcalloc(newsize*sizeof(dictEntry*));
 
     new_ht_used = 0;
-
+```
+將上方創建的新table指定為ht_table[1]，並將大小等參數一併存好
+```
     /* Prepare a second hash table for incremental rehashing.
      * We do this even for the first initialization, so that we can trigger the
      * rehashingStarted more conveniently, we will clean it up right after. */
@@ -79,8 +87,12 @@ int _dictExpand(dict *d, unsigned long size, int* malloc_failed)
     d->ht_used[1] = new_ht_used;
     d->ht_table[1] = new_ht_table;
     d->rehashidx = 0;
+```
+```
     if (d->type->rehashingStarted) d->type->rehashingStarted(d);
+```
 
+```
     /* Is this the first initialization or is the first hash table empty? If so
      * it's not really a rehashing, we can just set the first hash table so that
      * it can accept keys. */
