@@ -232,3 +232,73 @@ assert檢查rehashidx有無跑掉
 }
 ```
 
+```
+/* Resize the table to the minimal size that contains all the elements,
+ * but with the invariant of a USED/BUCKETS ratio near to <= 1 */
+int dictResize(dict *d)
+{
+    unsigned long minimal;
+
+    if (dict_can_resize != DICT_RESIZE_ENABLE || dictIsRehashing(d)) return DICT_ERR;
+    minimal = d->ht_used[0];
+    if (minimal < DICT_HT_INITIAL_SIZE)
+        minimal = DICT_HT_INITIAL_SIZE;
+    return dictExpand(d, minimal);
+}
+```
+```
+
+/* Expand or create the hash table,
+ * when malloc_failed is non-NULL, it'll avoid panic if malloc fails (in which case it'll be set to 1).
+ * Returns DICT_OK if expand was performed, and DICT_ERR if skipped. */
+int _dictExpand(dict *d, unsigned long size, int* malloc_failed)
+{
+    if (malloc_failed) *malloc_failed = 0;
+
+    /* the size is invalid if it is smaller than the number of
+     * elements already inside the hash table */
+    if (dictIsRehashing(d) || d->ht_used[0] > size)
+        return DICT_ERR;
+
+    /* the new hash table */
+    dictEntry **new_ht_table;
+    unsigned long new_ht_used;
+    signed char new_ht_size_exp = _dictNextExp(size);
+
+    /* Detect overflows */
+    size_t newsize = 1ul<<new_ht_size_exp;
+    if (newsize < size || newsize * sizeof(dictEntry*) < newsize)
+        return DICT_ERR;
+
+    /* Rehashing to the same table size is not useful. */
+    if (new_ht_size_exp == d->ht_size_exp[0]) return DICT_ERR;
+
+    /* Allocate the new hash table and initialize all pointers to NULL */
+    if (malloc_failed) {
+        new_ht_table = ztrycalloc(newsize*sizeof(dictEntry*));
+        *malloc_failed = new_ht_table == NULL;
+        if (*malloc_failed)
+            return DICT_ERR;
+    } else
+        new_ht_table = zcalloc(newsize*sizeof(dictEntry*));
+
+    new_ht_used = 0;
+
+    /* Is this the first initialization? If so it's not really a rehashing
+     * we just set the first hash table so that it can accept keys. */
+    if (d->ht_table[0] == NULL) {
+        d->ht_size_exp[0] = new_ht_size_exp;
+        d->ht_used[0] = new_ht_used;
+        d->ht_table[0] = new_ht_table;
+        return DICT_OK;
+    }
+
+    /* Prepare a second hash table for incremental rehashing */
+    d->ht_size_exp[1] = new_ht_size_exp;
+    d->ht_used[1] = new_ht_used;
+    d->ht_table[1] = new_ht_table;
+    d->rehashidx = 0;
+    return DICT_OK;
+}
+```
+
