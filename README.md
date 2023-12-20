@@ -1,6 +1,9 @@
 # redis dict rehashing解析
+本篇基於redis7.2版本，rehash指的是table大小的改變進程
 
 ## 基礎資料結構介紹
+大致上有dict、dictEntry、dictType、dictEntryNoValue這些struct，其中unstable版本會多一個dictStats，僅僅用來產生可閱讀資料測試用。
+### struct dict
 ```
 struct dict {
     dictType *type;  //存放各式函數指標
@@ -17,7 +20,8 @@ struct dict {
 };
 ```
 
-### 兩種Entry(作為節點使用)，分成有放key和沒放key兩種
+#### 兩種Entry(作為節點使用)
+分成有放key和沒放key兩種
 並且用於形成chaining，解決collision
 ```
 struct dictEntry {
@@ -38,8 +42,15 @@ typedef struct {
 ```
 
 ## 擴容或縮小
-參數size指新hash-table的大小，malloc_failed用來指示內存分配是否有問題
+#### 以下會介紹三種functions，_dictExpand, dictRehash, dictResize
+#### 這三個functions都用來調整dict的大小(也就是table大小)
+_dictExpand：調整大小或創建新table
+dictResize：調整table大小的同時，保證使用比(used buckets/buckets)接近<=1
+dictRehash：只負責搬遷buckets的一個過程，漸進式調整table大小，同時允許table在調整大小時同時被使用
 
+
+###_dictExpand
+參數size指新hash-table的大小，malloc_failed用來指示內存分配是否有問題
 ```
 int _dictExpand(dict *d, unsigned long size, int* malloc_failed)
 {
@@ -48,7 +59,7 @@ int _dictExpand(dict *d, unsigned long size, int* malloc_failed)
 ```
     if (malloc_failed) *malloc_failed = 0;    //初始化malloc_failed
 
-    /*如果dict正在rehashing或新大小小於現有大小，則返回錯誤*/
+    /*如果dict正在rehashing或新size小於現有使用buckets數，則返回錯誤*/
     if (dictIsRehashing(d) || d->ht_used[0] > size)
         return DICT_ERR;
 
@@ -65,6 +76,7 @@ int _dictExpand(dict *d, unsigned long size, int* malloc_failed)
     /* 如果新舊大小一樣，則返回錯誤 */
     if (new_ht_size_exp == d->ht_size_exp[0]) return DICT_ERR;
 ```
+
 如果上述錯誤檢測通過，並且內存分配沒有問題，創建一個新的table
 ```
     /* Allocate the new hash table and initialize all pointers to NULL */
@@ -78,6 +90,7 @@ int _dictExpand(dict *d, unsigned long size, int* malloc_failed)
 
     new_ht_used = 0;
 ```
+
 將上方創建的新table指定為ht_table[1]，並將大小等參數一併存好
 ```
     /* Prepare a second hash table for incremental rehashing.
@@ -88,10 +101,14 @@ int _dictExpand(dict *d, unsigned long size, int* malloc_failed)
     d->ht_table[1] = new_ht_table;
     d->rehashidx = 0;
 ```
+
+如果d->type->rehashingStarted這個函數pointer存在，就調用它，以下是dict.h中對它的描述：
+/* Invoked at the start of dict initialization/rehashing (old and new ht are already created) */
 ```
     if (d->type->rehashingStarted) d->type->rehashingStarted(d);
 ```
 
+如果ht_table[0]不存在或使用的bucket數為0，就直接設訂一個新的table，快速解決rehashing
 ```
     /* Is this the first initialization or is the first hash table empty? If so
      * it's not really a rehashing, we can just set the first hash table so that
@@ -110,10 +127,29 @@ int _dictExpand(dict *d, unsigned long size, int* malloc_failed)
     return DICT_OK;
 }
 ```
-### 解析int dictRehash(dict *d, int n)
-參數n*10決定最高同時訪問的空桶量，考慮極端情況下，只有5和99999這兩個bucket有資料，當轉移完5後，若沒限制訪問空桶量的限制，會從5一路訪問99999，造成其他事務必須等待，造成卡頓。<br>
+### dictResize(dict *d)
+```
+/* Resize the table to the minimal size that contains all the elements,
+ * but with the invariant of a USED/BUCKETS ratio near to <= 1 */
+int dictResize(dict *d)
+{
+    unsigned long minimal;
 
-取s0、s1分別為ht_table[0]和[1]的大小，此處exp指冪次，redis讓table的大小總是2^n，需要得到實際大小時，再使用DICTHT_SIZE這個類似macro的設計：當傳入一個數，假設是x，代表大小為table大小為2^x，首先檢查是否為-1，是的話回傳0，不是的話回傳x的二進位左移一位(等同10進位中n乘二的操作)，假設x=4，二進位表示為1000，左移一位得10000，即16。<br>
+    if (dict_can_resize != DICT_RESIZE_ENABLE || dictIsRehashing(d)) return DICT_ERR;
+    minimal = d->ht_used[0];
+    if (minimal < DICT_HT_INITIAL_SIZE)
+        minimal = DICT_HT_INITIAL_SIZE;
+    return dictExpand(d, minimal);
+}
+```
+### int dictRehash(dict *d, int n)
+參數n*10決定最高同時訪問的空桶量，考慮極端情況下，只有5和99999這兩個bucket有資料，當轉移完5後，
+若沒限制訪問空桶量的限制，會從5一路訪問99999，造成其他事務必須等待，造成卡頓。<br>
+
+取s0、s1分別為ht_table[0]和[1]的大小，此處exp指冪次，redis讓table的大小總是2^n，
+需要得到實際大小時，再使用DICTHT_SIZE這個類似macro的設計：
+當傳入一個數，假設是x，代表大小為table大小為2^x，首先檢查是否為-1，是的話回傳0，
+不是的話回傳x的二進位左移一位(等同10進位中n乘二的操作)，假設x=4，二進位表示為1000，左移一位得10000，即16。<br>
 ```
 #define DICTHT_SIZE(exp) ((exp) == -1 ? 0 : (unsigned long)1<<(exp))
 ```
@@ -136,7 +172,8 @@ int dictRehash(dict *d, int n) {
         return 0;
     }
 ```
-assert檢查rehashidx有無跑掉
+正式進入搬遷過程(while迴圈)
+先assert檢查rehashidx有無跑掉
 ```
     while(n-- && d->ht_used[0] != 0) {
         dictEntry *de, *nextde;
@@ -232,73 +269,4 @@ assert檢查rehashidx有無跑掉
 }
 ```
 
-```
-/* Resize the table to the minimal size that contains all the elements,
- * but with the invariant of a USED/BUCKETS ratio near to <= 1 */
-int dictResize(dict *d)
-{
-    unsigned long minimal;
-
-    if (dict_can_resize != DICT_RESIZE_ENABLE || dictIsRehashing(d)) return DICT_ERR;
-    minimal = d->ht_used[0];
-    if (minimal < DICT_HT_INITIAL_SIZE)
-        minimal = DICT_HT_INITIAL_SIZE;
-    return dictExpand(d, minimal);
-}
-```
-```
-
-/* Expand or create the hash table,
- * when malloc_failed is non-NULL, it'll avoid panic if malloc fails (in which case it'll be set to 1).
- * Returns DICT_OK if expand was performed, and DICT_ERR if skipped. */
-int _dictExpand(dict *d, unsigned long size, int* malloc_failed)
-{
-    if (malloc_failed) *malloc_failed = 0;
-
-    /* the size is invalid if it is smaller than the number of
-     * elements already inside the hash table */
-    if (dictIsRehashing(d) || d->ht_used[0] > size)
-        return DICT_ERR;
-
-    /* the new hash table */
-    dictEntry **new_ht_table;
-    unsigned long new_ht_used;
-    signed char new_ht_size_exp = _dictNextExp(size);
-
-    /* Detect overflows */
-    size_t newsize = 1ul<<new_ht_size_exp;
-    if (newsize < size || newsize * sizeof(dictEntry*) < newsize)
-        return DICT_ERR;
-
-    /* Rehashing to the same table size is not useful. */
-    if (new_ht_size_exp == d->ht_size_exp[0]) return DICT_ERR;
-
-    /* Allocate the new hash table and initialize all pointers to NULL */
-    if (malloc_failed) {
-        new_ht_table = ztrycalloc(newsize*sizeof(dictEntry*));
-        *malloc_failed = new_ht_table == NULL;
-        if (*malloc_failed)
-            return DICT_ERR;
-    } else
-        new_ht_table = zcalloc(newsize*sizeof(dictEntry*));
-
-    new_ht_used = 0;
-
-    /* Is this the first initialization? If so it's not really a rehashing
-     * we just set the first hash table so that it can accept keys. */
-    if (d->ht_table[0] == NULL) {
-        d->ht_size_exp[0] = new_ht_size_exp;
-        d->ht_used[0] = new_ht_used;
-        d->ht_table[0] = new_ht_table;
-        return DICT_OK;
-    }
-
-    /* Prepare a second hash table for incremental rehashing */
-    d->ht_size_exp[1] = new_ht_size_exp;
-    d->ht_used[1] = new_ht_used;
-    d->ht_table[1] = new_ht_table;
-    d->rehashidx = 0;
-    return DICT_OK;
-}
-```
 
