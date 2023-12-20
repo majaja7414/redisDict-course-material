@@ -44,9 +44,9 @@ typedef struct {
 ## 擴容或縮小
 #### 以下會介紹三種functions，_dictExpand, dictRehash, dictResize
 #### 這三個functions都用來調整dict的大小(也就是table大小)
-_dictExpand：調整大小或創建新table
-dictResize：調整table大小的同時，保證使用比(used buckets/buckets)接近<=1
-dictRehash：只負責搬遷buckets的一個過程，漸進式調整table大小，同時允許table在調整大小時同時被使用
+_dictExpand：調整大小或創建新table<br>
+dictResize：調整table大小的同時，保證使用比(used buckets/buckets)接近<=1<br>
+dictRehash：只負責搬遷buckets的一個過程，漸進式調整table大小，同時允許table在調整大小時同時被使用<br>
 
 
 ###_dictExpand
