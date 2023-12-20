@@ -55,7 +55,7 @@ dictRehash：只負責搬遷buckets的一個過程，漸進式調整table大小�
 int _dictExpand(dict *d, unsigned long size, int* malloc_failed)
 {
 ```
-錯誤檢測
+錯誤檢測，功能如註釋所述
 ```
     if (malloc_failed) *malloc_failed = 0;    //初始化malloc_failed
 
@@ -66,6 +66,7 @@ int _dictExpand(dict *d, unsigned long size, int* malloc_failed)
     /* 給定新的table */
     dictEntry **new_ht_table;
     unsigned long new_ht_used;
+    /*_dictNextExp(size)返還比size大的最小冪次*/
     signed char new_ht_size_exp = _dictNextExp(size);
 
     /* Detect overflows，檢查新大小是否合理 */
@@ -127,7 +128,11 @@ int _dictExpand(dict *d, unsigned long size, int* malloc_failed)
     return DICT_OK;
 }
 ```
+
 ### dictResize(dict *d)解析
+先進行錯誤檢測，如果目前全域設定不可resize或dict已經在rehashing，返回錯誤<br>
+設定minimal = 目前使用的buckets數，將minimal傳入dictExpand中調整大小<br>
+調整完後新的大小會讓used buckets/buckets接近<=1
 ```
 /* Resize the table to the minimal size that contains all the elements,
  * but with the invariant of a USED/BUCKETS ratio near to <= 1 */
@@ -140,6 +145,12 @@ int dictResize(dict *d)
     if (minimal < DICT_HT_INITIAL_SIZE)
         minimal = DICT_HT_INITIAL_SIZE;
     return dictExpand(d, minimal);
+}
+```
+註：dictExpand宣告如下
+```
+int dictExpand(dict *d, unsigned long size) {
+    return _dictExpand(d, size, NULL);
 }
 ```
 ### int dictRehash(dict *d, int n)解析
