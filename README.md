@@ -1,5 +1,5 @@
 # redis dict rehashing解析
-本篇基於redis7.2版本，rehash指的是table大小的改變進程
+本篇基於redis7.2版本，rehash指的是table大小的改變進程，介紹_dictExpand、dictResize、dictRehash這三個functions
 
 ## 基礎資料結構介紹
 大致上有dict、dictEntry、dictType、dictEntryNoValue這些struct，其中unstable版本會多一個dictStats，僅僅用來產生可閱讀資料測試用。
@@ -103,7 +103,7 @@ int _dictExpand(dict *d, unsigned long size, int* malloc_failed)
     d->rehashidx = 0;
 ```
 
-如果d->type->rehashingStarted這個函數pointer存在，就調用它，以下是dict.h中對它的描述：
+如果d->type->rehashingStarted這個函數pointer存在，就調用它，以下是dict.h中對它的描述：<br>
 /* Invoked at the start of dict initialization/rehashing (old and new ht are already created) */
 ```
     if (d->type->rehashingStarted) d->type->rehashingStarted(d);
