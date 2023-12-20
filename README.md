@@ -49,7 +49,7 @@ dictResize：調整table大小的同時，保證使用比(used buckets/buckets)�
 dictRehash：只負責搬遷buckets的一個過程，漸進式調整table大小，同時允許table在調整大小時同時被使用<br>
 
 
-###_dictExpand
+### _dictExpand(dict *d, unsigned long size, int* malloc_failed)解析
 參數size指新hash-table的大小，malloc_failed用來指示內存分配是否有問題
 ```
 int _dictExpand(dict *d, unsigned long size, int* malloc_failed)
@@ -127,7 +127,7 @@ int _dictExpand(dict *d, unsigned long size, int* malloc_failed)
     return DICT_OK;
 }
 ```
-### dictResize(dict *d)
+### dictResize(dict *d)解析
 ```
 /* Resize the table to the minimal size that contains all the elements,
  * but with the invariant of a USED/BUCKETS ratio near to <= 1 */
@@ -142,7 +142,7 @@ int dictResize(dict *d)
     return dictExpand(d, minimal);
 }
 ```
-### int dictRehash(dict *d, int n)
+### int dictRehash(dict *d, int n)解析
 參數n*10決定最高同時訪問的空桶量，考慮極端情況下，只有5和99999這兩個bucket有資料，當轉移完5後，
 若沒限制訪問空桶量的限制，會從5一路訪問99999，造成其他事務必須等待，造成卡頓。<br>
 
